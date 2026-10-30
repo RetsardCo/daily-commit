@@ -8,18 +8,67 @@ on:
 
 permissions:
   contents: write
+  issues: write
+  pull-requests: write
 
 jobs:
-  daily-commit:
+  daily-contribution:
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Append character and commit
+      - name: Configure git identity
         run: |
-          echo -n "." >> README.md
           git config user.name "RetsardCo"
           git config user.email "richardmampo.rm@gmail.com"
+
+      - name: Get today's date
+        id: date
+        run: echo "today=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Create an Issue
+        id: issue
+        run: |
+          ISSUE_URL=$(gh issue create \
+            --title "Daily log: ${{ steps.date.outputs.today }}" \
+            --body "Automated daily contribution for ${{ steps.date.outputs.today }}." \
+            --label "automated")
+          echo "url=$ISSUE_URL" >> "$GITHUB_OUTPUT"
+          ISSUE_NUM=$(echo "$ISSUE_URL" | grep -oP '\d+$')
+          echo "number=$ISSUE_NUM" >> "$GITHUB_OUTPUT"
+
+      - name: Create branch, commit, and open Pull Request
+        id: pr
+        run: |
+          BRANCH="daily/${{ steps.date.outputs.today }}"
+          git checkout -b "$BRANCH"
+          echo -n "." >> README.md
           git add README.md
-          git commit -m "Daily commit: $(date -u +%Y-%m-%d)"
-          git push
+          git commit -m "Daily commit: ${{ steps.date.outputs.today }}"
+          git push origin "$BRANCH"
+          PR_URL=$(gh pr create \
+            --title "Daily update: ${{ steps.date.outputs.today }}" \
+            --body "Closes #${{ steps.issue.outputs.number }}" \
+            --base master \
+            --head "$BRANCH")
+          echo "url=$PR_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Review the Pull Request
+        run: |
+          gh pr review "${{ steps.pr.outputs.url }}" \
+            --approve \
+            --body "Looks good! Auto-approved for ${{ steps.date.outputs.today }}."
+
+      - name: Merge the Pull Request
+        run: |
+          gh pr merge "${{ steps.pr.outputs.url }}" \
+            --merge \
+            --delete-branch
+
+      - name: Verify
+        run: |
+          echo "✅ Done for ${{ steps.date.outputs.today }}"
+          echo "   Issue:  ${{ steps.issue.outputs.url }}"
+          echo "   PR:     ${{ steps.pr.outputs.url }}"
